@@ -8,6 +8,26 @@ model = SentenceTransformer(
 )
 
 
+def contrastive_similarity(
+    target: str, candidate: str, baseline: str = "stain"
+) -> float:
+    # 1. Encode target, candidate, and a shared baseline keyword
+    v_target = model.encode(target)
+    v_candidate = model.encode(candidate)
+    v_baseline = model.encode(baseline)
+
+    # 2. Subtract the baseline noise to isolate the true distinguishing variance
+    v_target_isolated = v_target - v_baseline
+    v_candidate_isolated = v_candidate - v_baseline
+
+    # 3. Manually re-normalize to unit lengths
+    v_target_isolated /= np.linalg.norm(v_target_isolated)
+    v_candidate_isolated /= np.linalg.norm(v_candidate_isolated)
+
+    # 4. Compute the corrected dot product
+    return float(np.dot(v_target_isolated, v_candidate_isolated))
+
+
 def fuzzy_dot(a: str, b: str) -> float:
     """
     Calculates the semantic distance between two strings using Cosine Distance.
@@ -28,7 +48,7 @@ def fuzzy_match(a: str, b: str, alpha: float) -> bool:
 
 
 if __name__ == "__main__":
-    from cases import cases
+    from cases import passing_cases
 
-    for a, b in cases:
+    for a, b in passing_cases:
         print(f"dot('{a}', '{b}') = {fuzzy_dot(a, b):.4f}")

@@ -2,10 +2,10 @@ import numpy as np
 import torch
 from transformers import AutoModel, AutoTokenizer
 
-MODEL_NAME = "ncbi/MedCPT-Query-Encoder"
+MODEL_NAME = "cambridgeltl/SapBERT-from-PubMedBERT-fulltext"
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModel.from_pretrained(MODEL_NAME)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, local_files_only=True)
+model = AutoModel.from_pretrained(MODEL_NAME, local_files_only=True)
 model.eval()
 
 
@@ -19,11 +19,11 @@ def fuzzy_dot(a: str, b: str) -> float:
         truncation=True,
         padding=True,
         return_tensors="pt",
-        max_length=64,
+        max_length=25,
     )
 
     with torch.no_grad():
-        # MedCPT uses the final [CLS] hidden state as the query representation.
+        # SapBERT uses the final [CLS] hidden state as the entity representation.
         embeddings = model(**encoded).last_hidden_state[:, 0, :]
         embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
