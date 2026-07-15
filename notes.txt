@@ -1,0 +1,46 @@
+We're developing an FFI-based feature for scryer-prolog.
+
+The FFI bounary hinges around these two functions:
+
+```python
+import numpy as np
+from sentence_transformers import SentenceTransformer
+
+model = SentenceTransformer("nvidia/llama-embed-nemotron-8b", model_kwargs={"torch_dtype": "bfloat16"})
+
+def fuzzy_distance(a: str, b: str) -> float:
+    """
+    Calculates the semantic distance between two strings using Cosine Distance.
+    Returns a float where 1.0 means identical, and lower values mean less similar.
+    """
+    av: np.ndarray = model.encode(a) 
+    bv: np.ndarray = model.encode(b)
+    
+    # Because Sentence Transformers perfectly normalizes vectors to an L2 norm of 1,
+    # the dot product IS the cosine similarity.
+    dot_product = np.dot(av, bv)
+    
+    return float(dot_product)
+
+def fuzzy_match(a: str, b: str, alpha: float) -> bool
+    return fuzzy_distance(a, b) < alpha
+```
+
+This python functions are to be exposed as a predicate within prolog that accepts two string and an `alpha` parameter:
+
+```prolog
+fuzzy_match("Hello, world!", "hi globe", 0.5).
+fuzzy_distance("comma-shaped", "curved rod shaped", Distance).
+Distance = <return value from python fuzzy_distance>
+```
+
+On the python side, the `fuzzy_distance` function should embed the two strings using the nvidia/llama-embed-nemotron-8b model from huggingface. This model has already been cached locally with `hf download nvidia/llama-embed-nemotron-8b`. We need to normalize the output of the model so these distances can be compared:
+
+```
+
+# Sentence-Transformers natively appends the normalization layer automatically
+
+# These vectors are perfectly normalized!
+```
+
+The `fuzzy_match` function is a convenience method that computes `fuzzy_distance` and returns true if the 
