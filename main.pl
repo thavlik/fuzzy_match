@@ -1,4 +1,5 @@
 :- use_module(library(ffi)).
+:- use_module(library(format)).
 
 load_fuzzy_match_ffi :-
 	use_foreign_module("./fuzzy_match/libfuzzy_match.so", [
@@ -46,23 +47,64 @@ failing_case("hypotonic", "tight muscle").
 
 run_tests :-
 	threshold(Threshold),
-	test_passing_cases(Threshold),
-	test_failing_cases(Threshold),
+	collect_case_scores(passing_case, PassingCases),
+	collect_case_scores(failing_case, FailingCases),
+	print_case_statistics('Should pass', PassingCases),
+	nl,
+	print_case_statistics('Should fail', FailingCases),
+	test_passing_cases(PassingCases, Threshold),
+	test_failing_cases(FailingCases, Threshold),
+	nl,
 	write('All fuzzy-match FFI cases passed.'),
 	nl.
 
-test_passing_cases(Threshold) :-
-	\+ (passing_case(Concept, Target),
-		\+ fuzzy_match(Concept, Target, Threshold),
-		write('Expected match failed: '),
-		write(Concept-Target),
-		nl
-	).
+collect_case_scores(CasePredicate, Cases) :-
+	findall(case(Concept, Target, Score),
+		(call(CasePredicate, Concept, Target),
+		 fuzzy_score(Concept, Target, Score)),
+		Cases).
 
-test_failing_cases(Threshold) :-
-	\+ (failing_case(Concept, Target),
-		fuzzy_match(Concept, Target, Threshold),
-		write('Unexpected match succeeded: '),
-		write(Concept-Target),
-		nl
-	).
+print_case_statistics(Label, Cases) :-
+	case_score_range(Cases, Minimum, Maximum),
+	format("~a (min=~4f, max=~4f):~n", [Label, Minimum, Maximum]),
+	print_case_scores(Cases).
+
+print_case_scores([]).
+print_case_scores([case(Concept, Target, Score)|Cases]) :-
+	format("Concept: ~s~t~24| | Target: ~s~t~48| | Spread Score: ~4f~n",
+		[Concept, Target, Score]),
+	print_case_scores(Cases).
+
+case_score_range([case(_, _, Score)|Cases], Minimum, Maximum) :-
+	case_score_range_(Cases, Score, Score, Minimum, Maximum).
+
+case_score_range_([], Minimum, Maximum, Minimum, Maximum).
+case_score_range_([case(_, _, Score)|Cases], Minimum0, Maximum0,
+				  Minimum, Maximum) :-
+	(   Score < Minimum0 -> Minimum1 = Score
+	;   Minimum1 = Minimum0
+	),
+	(   Score > Maximum0 -> Maximum1 = Score
+	;   Maximum1 = Maximum0
+	),
+	case_score_range_(Cases, Minimum1, Maximum1, Minimum, Maximum).
+
+test_passing_cases([], _).
+test_passing_cases([case(Concept, Target, Score)|Cases], Threshold) :-
+	(   fuzzy_match(Concept, Target, Threshold) ->
+		true
+	;   format("Expected match failed: ~s - ~s (score=~4f, threshold=~4f)~n",
+			[Concept, Target, Score, Threshold]),
+		false
+	),
+	test_passing_cases(Cases, Threshold).
+
+test_failing_cases([], _).
+test_failing_cases([case(Concept, Target, Score)|Cases], Threshold) :-
+	(   fuzzy_match(Concept, Target, Threshold) ->
+		format("Unexpected match succeeded: ~s - ~s (score=~4f, threshold=~4f)~n",
+			[Concept, Target, Score, Threshold]),
+		false
+	;   true
+	),
+	test_failing_cases(Cases, Threshold).
