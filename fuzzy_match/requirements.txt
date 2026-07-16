@@ -2,3 +2,4 @@ numpy
 sentence_transformers
 torch
 transformers
+accelerate
