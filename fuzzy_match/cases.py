@@ -14,6 +14,10 @@ passing_cases = [
         "numerous multicolored bruises",
         "multiple bruises in various stages of healing",
     ),
+    (
+        "ovoid diplococci in chain-like arrangements",
+        "chains of elliptical-shape spheres",
+    ),
 ]
 
 failing_cases = [
