@@ -35,7 +35,7 @@ scryer-prolog main.pl
 Example queries:
 
 ```prolog
-?- fuzzy_match("eosinophilic", "pink", 0.3).
+?- fuzzy_match("eosinophilic", "pink", 0.5).
 	true.
 ?- fuzzy_score("eosinophilic", "pink", Score).
 	Score = 0.999...

@@ -165,10 +165,10 @@ scryer-prolog main.pl
 ### Boolean matching
 
 ```prolog
-?- fuzzy_match("eosinophilic", "pink", 0.3).
+?- fuzzy_match("eosinophilic", "pink", 0.5).
    true.
 
-?- fuzzy_match("basophilic", "red", 0.3).
+?- fuzzy_match("basophilic", "red", 0.5).
    false.
 ```
 
@@ -203,7 +203,7 @@ All fuzzy-match FFI cases passed.
 
 ## Tests
 
-The test threshold is `0.3`. There are 13 expected matches and 4 expected
+The test threshold is `0.5`. There are 13 expected matches and 4 expected
 non-matches covering stain colors, morphology, muscle tone, organisms, and
 clinical descriptions. The canonical Python case list is in
 `fuzzy_match/tests/cases.py`; equivalent Prolog facts are maintained in
