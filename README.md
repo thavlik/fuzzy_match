@@ -189,7 +189,7 @@ floating-point behavior.
 
 ```prolog
 ?- run_tests.
-Should pass (min=0.3782, max=0.9992):
+Should pass (min=0.5782, max=0.9992):
 Concept: comma-shaped    | Target: curved rod    | Spread Score: 0.5317
 ...
 
