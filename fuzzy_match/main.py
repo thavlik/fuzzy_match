@@ -99,27 +99,23 @@ if __name__ == "__main__":
     from tests.cases import failing_cases, passing_cases
 
     print("")
-    print("Should pass (similar):")
     results = check_medical_synonyms(passing_cases)
-    minimum = 99999.0
-    maximum = -99999.0
+    minimum, maximum = 99999.0, -99999.0
+    minimum = min(score for score in results)
+    maximum = max(score for score in results)
+    print(f"Should pass (min={minimum:.4f}, max={maximum:.4f}):")
     for (concept, definition), score in zip(passing_cases, results):
         print(
             f"Concept: {concept:<14} | Target: {definition:<12} | Spread Score: {score:.4f}"
         )
-        minimum = min(minimum, score)
-        maximum = max(maximum, score)
-    print(f"Minimum score: {minimum:.4f}, Maximum score: {maximum:.4f}")
 
     print("")
-    print("Should fail (dissimilar):")
     results = check_medical_synonyms(failing_cases)
-    minimum = 99999.0
-    maximum = -99999.0
+    minimum, maximum = 99999.0, -99999.0
+    minimum = min(score for score in results)
+    maximum = max(score for score in results)
+    print(f"Should fail (min={minimum:.4f}, max={maximum:.4f}):")
     for (concept, definition), score in zip(failing_cases, results):
         print(
             f"Concept: {concept:<14} | Target: {definition:<12} | Spread Score: {score:.4f}"
         )
-        minimum = min(minimum, score)
-        maximum = max(maximum, score)
-    print(f"Minimum score: {minimum:.4f}, Maximum score: {maximum:.4f}")
