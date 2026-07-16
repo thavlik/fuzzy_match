@@ -300,56 +300,75 @@ if __name__ == "__main__":
     # Natively reads your local cases file configuration
     from tests.cases import failing_cases, passing_cases
 
-    print(f"Relation label token IDs: {RELATION_TOKEN_IDS}")
-
-    print("")
     evaluations = evaluate_medical_relations(passing_cases)
     minimum = min(evaluation.score for evaluation in evaluations)
     maximum = max(evaluation.score for evaluation in evaluations)
-    print(f"Should pass (min={minimum:.4f}, max={maximum:.4f}):")
     scored_cases = sorted(
         zip(passing_cases, evaluations),
         key=lambda item: item[1].score,
         reverse=True,
     )
+    threshold = 0.5
+    print(f"Score threshold: {threshold}\n")
+    total_passing = sum(evaluation.score >= threshold for evaluation in evaluations)
+    print(
+        f"Should pass ({total_passing}/{len(passing_cases)}, min={minimum:.4f}, max={maximum:.4f}):"
+    )
+    min_passing = minimum
     for (concept, definition), evaluation in scored_cases:
         probabilities = evaluation.relation_probabilities
         logits = evaluation.relation_logits
         print(
             f"Concept: {concept:<24} | Target: {definition:<40} "
-            f"| Relation: {evaluation.predicted_relation:<13} "
+            # f"| Relation: {evaluation.predicted_relation:<13} "
             f"| Score: {evaluation.score:.4f} "
-            f"| P(A/B/C): {probabilities['equivalent']:.4f}/"
-            f"{probabilities['contradictory']:.4f}/{probabilities['unrelated']:.4f} "
-            f"| Logits(A/B/C): {logits['equivalent']:.2f}/"
-            f"{logits['contradictory']:.2f}/{logits['unrelated']:.2f} "
-            f"| Label mass: {evaluation.label_probability_mass:.4f} "
-            f"| Top token: {evaluation.top_token!r} "
-            f"(id={evaluation.top_token_id}, p={evaluation.top_token_probability:.4f})"
+            f"| Pass: {evaluation.score >= threshold} "
+            # f"| P(A/B/C): {probabilities['equivalent']:.4f}/"
+            # f"{probabilities['contradictory']:.4f}/{probabilities['unrelated']:.4f} "
+            # f"| Logits(A/B/C): {logits['equivalent']:.2f}/"
+            # f"{logits['contradictory']:.2f}/{logits['unrelated']:.2f} "
+            # f"| Label mass: {evaluation.label_probability_mass:.4f} "
+            # f"| Top token: {evaluation.top_token!r} "
+            # f"(id={evaluation.top_token_id}, p={evaluation.top_token_probability:.4f})"
         )
 
     print("")
     evaluations = evaluate_medical_relations(failing_cases)
     minimum = min(evaluation.score for evaluation in evaluations)
     maximum = max(evaluation.score for evaluation in evaluations)
-    print(f"Should fail (min={minimum:.4f}, max={maximum:.4f}):")
+    max_failing = maximum
     scored_cases = sorted(
         zip(failing_cases, evaluations),
         key=lambda item: item[1].score,
         reverse=True,
     )
+    total_failing = sum(evaluation.score < threshold for evaluation in evaluations)
+    print(
+        f"Should fail ({total_failing}/{len(failing_cases)}, min={minimum:.4f}, max={maximum:.4f}):"
+    )
     for (concept, definition), evaluation in scored_cases:
         probabilities = evaluation.relation_probabilities
         logits = evaluation.relation_logits
+        # print(
+        #    f"Concept: {concept:<24} | Target: {definition:<40} "
+        #    f"| Relation: {evaluation.predicted_relation:<13} "
+        #    f"| Score: {evaluation.score:.4f} "
+        #    f"| P(A/B/C): {probabilities['equivalent']:.4f}/"
+        #    f"{probabilities['contradictory']:.4f}/{probabilities['unrelated']:.4f} "
+        #    f"| Logits(A/B/C): {logits['equivalent']:.2f}/"
+        #    f"{logits['contradictory']:.2f}/{logits['unrelated']:.2f} "
+        #    f"| Label mass: {evaluation.label_probability_mass:.4f} "
+        #    f"| Top token: {evaluation.top_token!r} "
+        #    f"(id={evaluation.top_token_id}, p={evaluation.top_token_probability:.4f})"
+        # )
         print(
             f"Concept: {concept:<24} | Target: {definition:<40} "
-            f"| Relation: {evaluation.predicted_relation:<13} "
             f"| Score: {evaluation.score:.4f} "
-            f"| P(A/B/C): {probabilities['equivalent']:.4f}/"
-            f"{probabilities['contradictory']:.4f}/{probabilities['unrelated']:.4f} "
-            f"| Logits(A/B/C): {logits['equivalent']:.2f}/"
-            f"{logits['contradictory']:.2f}/{logits['unrelated']:.2f} "
-            f"| Label mass: {evaluation.label_probability_mass:.4f} "
-            f"| Top token: {evaluation.top_token!r} "
-            f"(id={evaluation.top_token_id}, p={evaluation.top_token_probability:.4f})"
+            f"| Pass: {evaluation.score >= threshold} "
         )
+    print(
+        f"\nTotal matching errors: {len(passing_cases) + len(failing_cases) - total_passing - total_failing}"
+    )
+    print(f"Minimum passing score: {min_passing:.4f}")
+    print(f"Maximum failing score: {max_failing:.4f}")
+    print(f"Spread: {min_passing - max_failing:.4f}")

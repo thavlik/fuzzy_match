@@ -186,6 +186,8 @@ passing_cases = [
     ("ultrasonography", "ultrasound imaging"),
     ("radiolucent", "appears dark on an X-ray"),
     ("radiopaque", "appears white on an X-ray"),
+    ("ipsilateral", "on the same side"),
+    ("contralateral", "on the opposite side"),
 ]
 
 failing_cases = [

@@ -24,22 +24,60 @@ They are available from Prolog as:
 
 ## How scoring works
 
-For each concept/target pair, the Python implementation constructs a few-shot
-chat prompt asking Llama whether the expressions are equivalent. It reads the
-model's logits at the first answer token and computes:
+Scoring uses a hierarchical classifier built from one or two few-shot Llama
+prompts. Each stage reads the logits at the first answer token and normalizes
+them over that stage's allowed single-token labels.
+
+The equivalence stage always runs and distinguishes:
+
+- `A` — equivalent: synonyms, colloquial descriptions, morphology, stain
+  colors, clinical shorthand, or functional definitions of the same idea.
+- `C` — unrelated: medically associated expressions that do not describe the
+  same idea.
+
+Its conditional equivalence probability is:
+
+$$
+P_E = \frac{\exp(\ell_A)}{\exp(\ell_A) + \exp(\ell_C)}
+$$
+
+where $\ell_A$ and $\ell_C$ are the first-token logits for labels `A` and `C`.
+
+Some targets contain assertion or directional cues such as `no`, `without`,
+`absent`, `normal`, `reduces`, or `as needed`. For these pairs, a separate
+contradiction stage runs first and distinguishes:
+
+- `A` — not contradictory: equivalent, compatible, or merely unrelated.
+- `B` — contradictory: opposite or mutually incompatible clinical states.
+
+The contradiction probability is computed from its `A` and `B` logits in the
+same way. If $P(\text{contradictory}) \ge 0.5$, contradiction vetoes semantic
+similarity and the final score is `0.0`. This prevents pairs such as
+`epistaxis` / `no nasal bleeding` from matching solely because their medical
+content overlaps. The cue detector treats assertional phrases such as
+`negative for` separately from terminology such as `gram-negative`.
+
+If the contradiction veto does not fire, the result is:
 
 $$
 \operatorname{score} =
-\frac{P(\text{yes})}{P(\text{yes}) + P(\text{no})}
+\begin{cases}
+P_E, & P_E > 0.5 \\
+0, & \text{otherwise}
+\end{cases}
 $$
 
-Probability mass from both lowercase and capitalized `yes` and `no` tokens is
-included. `fuzzy_match` succeeds when this score is at least the supplied
-threshold.
+`fuzzy_match` succeeds when this final score is at least the caller-supplied
+threshold. Consequently, an unrelated or contradictory pair receives exactly
+zero rather than a low nonzero similarity score. Since equivalence must beat
+unrelatedness before a nonzero score is returned, nonzero scores are greater
+than `0.5`.
 
-The current prompt is designed for medical and scientific vocabulary and
-contains examples for histological terms such as *basophilic* and
-*eosinophilic*. Scores outside this domain have not been calibrated.
+The prompts are calibrated for medical and scientific vocabulary, including
+plain-language descriptions, histology, morphology, microbiology, symptoms,
+and treatments. Scores outside this domain have not been calibrated. Ordinary
+pairs require one model inference; pairs that activate contradiction detection
+require two.
 
 ## Architecture
 
@@ -179,7 +217,7 @@ with double quotes. `Threshold` is a floating-point input.
 
 ```prolog
 ?- fuzzy_score("eosinophilic", "pink", Score).
-   Score = 0.9991845286973647.
+  Score = 0.97....
 ```
 
 The exact score can vary slightly with library versions, GPU hardware, and
@@ -189,12 +227,12 @@ floating-point behavior.
 
 ```prolog
 ?- run_tests.
-Should pass (min=0.5782, max=0.9992):
-Concept: comma-shaped    | Target: curved rod    | Spread Score: 0.5317
+Should pass (min=0.9..., max=0.9...):
+Concept: comma-shaped    | Target: curved rod    | Spread Score: 0.9...
 ...
 
-Should fail (min=0.0026, max=0.2463):
-Concept: basophilic      | Target: red           | Spread Score: 0.0026
+Should fail (min=0.0000, max=0.0000):
+Concept: basophilic      | Target: red           | Spread Score: 0.0000
 ...
 
 All fuzzy-match FFI cases passed.
@@ -229,8 +267,9 @@ The harness:
 4. Fails and prints the concept, target, score, and threshold if an expectation
    is violated.
 
-Because both exported paths are tested, model inference is performed twice per
-case.
+Because both exported paths are tested, each case is scored twice. Each score
+uses one model inference for ordinary pairs or two when contradiction cues are
+present.
 
 The Python implementation can also print its score report directly:
 
