@@ -104,7 +104,10 @@ if __name__ == "__main__":
     minimum = min(score for score in results)
     maximum = max(score for score in results)
     print(f"Should pass (min={minimum:.4f}, max={maximum:.4f}):")
-    for (concept, definition), score in zip(passing_cases, results):
+    scored_cases = sorted(
+        zip(passing_cases, results), key=lambda item: item[1], reverse=True
+    )
+    for (concept, definition), score in scored_cases:
         print(
             f"Concept: {concept:<14} | Target: {definition:<12} | Spread Score: {score:.4f}"
         )
@@ -115,7 +118,10 @@ if __name__ == "__main__":
     minimum = min(score for score in results)
     maximum = max(score for score in results)
     print(f"Should fail (min={minimum:.4f}, max={maximum:.4f}):")
-    for (concept, definition), score in zip(failing_cases, results):
+    scored_cases = sorted(
+        zip(failing_cases, results), key=lambda item: item[1], reverse=True
+    )
+    for (concept, definition), score in scored_cases:
         print(
             f"Concept: {concept:<14} | Target: {definition:<12} | Spread Score: {score:.4f}"
         )
