@@ -17,12 +17,12 @@ fuzzy_score(Concept, Target, Score) :-
 	ffi:fuzzy_score(Concept, Target, Score).
 
 % Usage:
-% ?- fuzzy_match("eosinophilic", "pink", 0.3).
+% ?- fuzzy_match("eosinophilic", "pink", 0.5).
 %    true.
 % ?- fuzzy_score("eosinophilic", "pink", Score).
 %    Score = 0.999...
 
-threshold(0.3).
+threshold(0.5).
 
 passing_case("comma-shaped", "curved rod").
 passing_case("eosinophilic", "pink").
