@@ -1,7 +1,0 @@
-We're developing an FFI-based feature for scryer-prolog based on fuzzy_match/main.py's `fuzzy_match` and `fuzzy_score` functions.
-
-In the end, we want two FFIs exported: fuzzy_match/3 and fuzzy_score/2.
-
-Usage example for the exported functions should be placecd in main.pl, and the test cases should mirror fuzzy_match/tests/cases.py. Use a threshold value of 0.3 and all of the passing cases should pass and the failing cases should fail.
-
-Now implement the FFI boundary so these two python functions can be accessed from prolog.
