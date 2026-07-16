@@ -1,3 +1,6 @@
+import re
+from dataclasses import dataclass
+
 import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -11,68 +14,267 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 model.eval()
 
-# Pre-fetch the exact token IDs for "yes" and "no" inside the Llama-3 vocabulary
-# We check both lowercase and capitalized variants to capture all probability mass
-YES_IDS = [
-    tokenizer.convert_tokens_to_ids("yes"),
-    tokenizer.convert_tokens_to_ids("Yes"),
+RELATION_LABELS = {
+    "equivalent": "A",
+    "contradictory": "B",
+    "unrelated": "C",
+}
+CONTRADICTION_VETO_THRESHOLD = 0.5
+CONTRADICTION_CUE_PATTERN = re.compile(
+    r"\b(?:no|not|without|absent|denies|negative\s+(?:for|test|result)|"
+    r"reduces?|decreases?|increases?|clear|normal|hard|infrequent|only|as\s+needed)\b",
+    re.IGNORECASE,
+)
+
+
+def get_label_token_id(label: str) -> int:
+    token_ids = tokenizer.encode(label, add_special_tokens=False)
+    if len(token_ids) != 1:
+        raise RuntimeError(
+            f"Relation label {label!r} is not a single token: {token_ids}"
+        )
+    return token_ids[0]
+
+
+RELATION_TOKEN_IDS = {
+    relation: get_label_token_id(label) for relation, label in RELATION_LABELS.items()
+}
+
+
+@dataclass(frozen=True)
+class RelationEvaluation:
+    relation_logits: dict[str, float]
+    relation_probabilities: dict[str, float]
+    contradiction_veto_enabled: bool
+    label_probability_mass: float
+    top_token: str
+    top_token_id: int
+    top_token_probability: float
+
+    @property
+    def predicted_relation(self) -> str:
+        if (
+            self.contradiction_veto_enabled
+            and self.relation_probabilities["contradictory"]
+            >= CONTRADICTION_VETO_THRESHOLD
+        ):
+            return "contradictory"
+        return max(
+            ("equivalent", "unrelated"),
+            key=self.relation_probabilities.get,
+        )
+
+    @property
+    def score(self) -> float:
+        if self.predicted_relation != "equivalent":
+            return 0.0
+        non_contradictory_mass = (
+            self.relation_probabilities["equivalent"]
+            + self.relation_probabilities["unrelated"]
+        )
+        return self.relation_probabilities["equivalent"] / non_contradictory_mass
+
+
+CONTRADICTION_SYSTEM_PROMPT = """You are a precise clinical vocabulary auditor. Decide only whether a medical concept and target contradict each other.
+
+B = CONTRADICTORY: They describe opposite or mutually incompatible clinical states.
+A = NOT CONTRADICTORY: They are equivalent, compatible, or unrelated.
+
+A concept naming a condition asserts that it is present unless the concept itself expresses absence. Compare both the clinical idea and its assertion polarity. If one expression affirms an idea and the other denies or reverses that same idea, choose B even when every other medical word overlaps. Words such as no, not, without, absent, denies, negative, increased, and decreased can reverse the relationship. A negated expression can be compatible when the concept itself expresses absence, such as afebrile and without fever. Unrelated expressions are N, not B.
+
+Respond with exactly one label: A or B."""
+
+EQUIVALENCE_SYSTEM_PROMPT = """You are a precise clinical vocabulary auditor. Decide whether a medical or scientific concept and target name or accurately describe the same idea.
+
+A = EQUIVALENT: The target may be a synonym, plain-language description, visual description, morphology, stain color, clinical shorthand, or functional definition of the concept. Do not require identical wording or taxonomic precision when the target accurately conveys the intended medical feature.
+C = UNRELATED: The expressions do not describe the same clinical or scientific idea. Mere medical co-occurrence, treatment relationships, causes, or anatomical proximity are not equivalence.
+
+Assume contradiction has already been checked. Respond with exactly one label: A or C."""
+
+CONTRADICTION_DEMONSTRATIONS = [
+    ("peripheral edema", "no limb swelling", "B"),
+    ("afebrile", "fever present", "B"),
+    ("diuretic", "reduces urine production", "B"),
+    ("bacteremia", "bloodstream without bacteria", "B"),
+    ("peripheral edema", "limb swelling", "A"),
+    ("afebrile", "without a fever", "A"),
+    ("epistaxis", "nosebleed", "A"),
+    ("epistaxis", "joint pain", "A"),
+    ("eosinophilic", "pinkish red", "A"),
+    ("basophilic", "blue-purple", "A"),
+    ("hypertonic", "tight muscle", "A"),
+    ("multicolored bruises", "bruises in different healing stages", "A"),
+    ("ovoid cocci in chains", "chains of elliptical spheres", "A"),
 ]
-NO_IDS = [tokenizer.convert_tokens_to_ids("no"), tokenizer.convert_tokens_to_ids("No")]
+
+EQUIVALENCE_DEMONSTRATIONS = [
+    ("comma-shaped", "curved rod", "A"),
+    ("eosinophilic", "red", "A"),
+    ("eosinophilic", "pinkish red", "A"),
+    ("basophilic", "blue", "A"),
+    ("basophilic", "blue-purple", "A"),
+    ("hypertonic", "tight muscle", "A"),
+    ("multicolored bruises", "bruises in different healing stages", "A"),
+    ("ovoid cocci in chains", "chains of elliptical spheres", "A"),
+    ("gram-negative bacilli", "pink-staining rod-shaped bacteria", "A"),
+    ("epistaxis", "joint pain", "C"),
+    ("magnetic resonance imaging", "antibiotic medication", "C"),
+    ("bradycardia", "skin rash", "C"),
+    ("peripheral edema", "kidney stone", "C"),
+    ("diuretic", "magnetic resonance imaging", "C"),
+    ("bacteremia", "joint dislocation", "C"),
+    ("fracture", "nasal congestion", "C"),
+]
 
 
-def check_medical_synonyms(pairs: list) -> list:
+def build_messages(
+    system_prompt: str,
+    demonstrations: list[tuple[str, str, str]],
+    concept: str,
+    definition: str,
+) -> list[dict[str, str]]:
+    messages = [{"role": "system", "content": system_prompt}]
+    for example_concept, example_definition, label in demonstrations:
+        messages.extend(
+            [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Concept: {example_concept} | Target: {example_definition}"
+                    ),
+                },
+                {"role": "assistant", "content": label},
+            ]
+        )
+    messages.append(
+        {"role": "user", "content": f"Concept: {concept} | Target: {definition}"}
+    )
+    return messages
+
+
+def evaluate_stage(
+    concept: str,
+    definition: str,
+    system_prompt: str,
+    demonstrations: list[tuple[str, str, str]],
+    labels: dict[str, int],
+) -> tuple[dict[str, float], dict[str, float], float]:
+    prompt = tokenizer.apply_chat_template(
+        build_messages(system_prompt, demonstrations, concept, definition),
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+        next_token_logits = outputs.logits[0, -1, :].float()
+        vocabulary_probabilities = F.softmax(next_token_logits, dim=-1)
+        label_logits_tensor = torch.stack(
+            [next_token_logits[token_id] for token_id in labels.values()]
+        )
+        label_probabilities_tensor = F.softmax(label_logits_tensor, dim=0)
+
+    label_logits = {
+        label: label_logits_tensor[index].item() for index, label in enumerate(labels)
+    }
+    label_probabilities = {
+        label: label_probabilities_tensor[index].item()
+        for index, label in enumerate(labels)
+    }
+    label_probability_mass = sum(
+        vocabulary_probabilities[token_id].item() for token_id in labels.values()
+    )
+    return label_logits, label_probabilities, label_probability_mass
+
+
+def evaluate_medical_relations(
+    pairs: list[tuple[str, str]],
+) -> list[RelationEvaluation]:
     """
-    Evaluates concept-definition pairs using a few-shot conversational template.
-    Extracts the isolated token probability mass at the first prediction transition.
+    Classifies concept-definition pairs and retains diagnostics from the first
+    prediction transition.
     """
-    scores = []
+    evaluations = []
 
     for concept, definition in pairs:
-        # A few-shot prompt teaches the model exactly how to map histological terms
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a precise clinical vocabulary auditor. Your job is to verify if two medical "
-                    "or scientific terms are accurate synonyms or descriptions of each other.\n"
-                    "Examples:\n"
-                    "Concept: basophilic | Target: blue -> yes\n"
-                    "Concept: eosinophilic | Target: pink -> yes\n"
-                    "Respond with exactly one word: yes or no."
-                ),
-            },
-            {"role": "user", "content": f"Concept: {concept} | Target: {definition}"},
-        ]
-
-        # Use the official chat template formatting natively
-        prompt = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+        contradiction_veto_enabled = bool(
+            CONTRADICTION_CUE_PATTERN.search(f"{concept} {definition}")
         )
-        inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
+        if contradiction_veto_enabled:
+            contradiction_logits, contradiction_probabilities, contradiction_mass = (
+                evaluate_stage(
+                    concept,
+                    definition,
+                    CONTRADICTION_SYSTEM_PROMPT,
+                    CONTRADICTION_DEMONSTRATIONS,
+                    {
+                        "contradictory": RELATION_TOKEN_IDS["contradictory"],
+                        "not_contradictory": RELATION_TOKEN_IDS["equivalent"],
+                    },
+                )
+            )
+        else:
+            contradiction_logits = {
+                "contradictory": float("-inf"),
+                "not_contradictory": 0.0,
+            }
+            contradiction_probabilities = {
+                "contradictory": 0.0,
+                "not_contradictory": 1.0,
+            }
+            contradiction_mass = 1.0
+        equivalence_logits, equivalence_probabilities, equivalence_mass = (
+            evaluate_stage(
+                concept,
+                definition,
+                EQUIVALENCE_SYSTEM_PROMPT,
+                EQUIVALENCE_DEMONSTRATIONS,
+                {
+                    "equivalent": RELATION_TOKEN_IDS["equivalent"],
+                    "unrelated": RELATION_TOKEN_IDS["unrelated"],
+                },
+            )
+        )
 
-        with torch.no_grad():
-            outputs = model(**inputs)
+        contradictory_probability = contradiction_probabilities["contradictory"]
+        not_contradictory_probability = 1.0 - contradictory_probability
+        relation_probabilities = {
+            "equivalent": not_contradictory_probability
+            * equivalence_probabilities["equivalent"],
+            "contradictory": contradictory_probability,
+            "unrelated": not_contradictory_probability
+            * equivalence_probabilities["unrelated"],
+        }
+        predicted_relation = max(
+            ("equivalent", "unrelated"), key=relation_probabilities.get
+        )
+        if (
+            contradiction_veto_enabled
+            and contradictory_probability >= CONTRADICTION_VETO_THRESHOLD
+        ):
+            predicted_relation = "contradictory"
+        evaluations.append(
+            RelationEvaluation(
+                relation_logits={
+                    "equivalent": equivalence_logits["equivalent"],
+                    "contradictory": contradiction_logits["contradictory"],
+                    "unrelated": equivalence_logits["unrelated"],
+                },
+                relation_probabilities=relation_probabilities,
+                contradiction_veto_enabled=contradiction_veto_enabled,
+                label_probability_mass=min(contradiction_mass, equivalence_mass),
+                top_token=RELATION_LABELS[predicted_relation],
+                top_token_id=RELATION_TOKEN_IDS[predicted_relation],
+                top_token_probability=relation_probabilities[predicted_relation],
+            )
+        )
 
-            # Isolate the raw un-bounded logits from the final token transition layer
-            next_token_logits = outputs.logits[0, -1, :].float()
+    return evaluations
 
-            # Apply a global softmax to convert raw logits to true probability distributions
-            probs = F.softmax(next_token_logits, dim=-1)
 
-            # Sum up the probability weights assigned to yes vs no
-            weight_yes = sum(probs[y_id].item() for y_id in YES_IDS)
-            weight_no = sum(probs[n_id].item() for n_id in NO_IDS)
-
-            # Normalize the mathematical spread strictly between the two valid outcomes
-            total_mass = weight_yes + weight_no
-            if total_mass == 0:
-                score = 0.0
-            else:
-                score = weight_yes / total_mass
-
-            scores.append(score)
-
-    return scores
+def check_medical_synonyms(pairs: list[tuple[str, str]]) -> list[float]:
+    return [evaluation.score for evaluation in evaluate_medical_relations(pairs)]
 
 
 def fuzzy_score(a: str, b: str) -> float:
@@ -98,30 +300,56 @@ if __name__ == "__main__":
     # Natively reads your local cases file configuration
     from tests.cases import failing_cases, passing_cases
 
+    print(f"Relation label token IDs: {RELATION_TOKEN_IDS}")
+
     print("")
-    results = check_medical_synonyms(passing_cases)
-    minimum, maximum = 99999.0, -99999.0
-    minimum = min(score for score in results)
-    maximum = max(score for score in results)
+    evaluations = evaluate_medical_relations(passing_cases)
+    minimum = min(evaluation.score for evaluation in evaluations)
+    maximum = max(evaluation.score for evaluation in evaluations)
     print(f"Should pass (min={minimum:.4f}, max={maximum:.4f}):")
     scored_cases = sorted(
-        zip(passing_cases, results), key=lambda item: item[1], reverse=True
+        zip(passing_cases, evaluations),
+        key=lambda item: item[1].score,
+        reverse=True,
     )
-    for (concept, definition), score in scored_cases:
+    for (concept, definition), evaluation in scored_cases:
+        probabilities = evaluation.relation_probabilities
+        logits = evaluation.relation_logits
         print(
-            f"Concept: {concept:<14} | Target: {definition:<12} | Spread Score: {score:.4f}"
+            f"Concept: {concept:<24} | Target: {definition:<40} "
+            f"| Relation: {evaluation.predicted_relation:<13} "
+            f"| Score: {evaluation.score:.4f} "
+            f"| P(A/B/C): {probabilities['equivalent']:.4f}/"
+            f"{probabilities['contradictory']:.4f}/{probabilities['unrelated']:.4f} "
+            f"| Logits(A/B/C): {logits['equivalent']:.2f}/"
+            f"{logits['contradictory']:.2f}/{logits['unrelated']:.2f} "
+            f"| Label mass: {evaluation.label_probability_mass:.4f} "
+            f"| Top token: {evaluation.top_token!r} "
+            f"(id={evaluation.top_token_id}, p={evaluation.top_token_probability:.4f})"
         )
 
     print("")
-    results = check_medical_synonyms(failing_cases)
-    minimum, maximum = 99999.0, -99999.0
-    minimum = min(score for score in results)
-    maximum = max(score for score in results)
+    evaluations = evaluate_medical_relations(failing_cases)
+    minimum = min(evaluation.score for evaluation in evaluations)
+    maximum = max(evaluation.score for evaluation in evaluations)
     print(f"Should fail (min={minimum:.4f}, max={maximum:.4f}):")
     scored_cases = sorted(
-        zip(failing_cases, results), key=lambda item: item[1], reverse=True
+        zip(failing_cases, evaluations),
+        key=lambda item: item[1].score,
+        reverse=True,
     )
-    for (concept, definition), score in scored_cases:
+    for (concept, definition), evaluation in scored_cases:
+        probabilities = evaluation.relation_probabilities
+        logits = evaluation.relation_logits
         print(
-            f"Concept: {concept:<14} | Target: {definition:<12} | Spread Score: {score:.4f}"
+            f"Concept: {concept:<24} | Target: {definition:<40} "
+            f"| Relation: {evaluation.predicted_relation:<13} "
+            f"| Score: {evaluation.score:.4f} "
+            f"| P(A/B/C): {probabilities['equivalent']:.4f}/"
+            f"{probabilities['contradictory']:.4f}/{probabilities['unrelated']:.4f} "
+            f"| Logits(A/B/C): {logits['equivalent']:.2f}/"
+            f"{logits['contradictory']:.2f}/{logits['unrelated']:.2f} "
+            f"| Label mass: {evaluation.label_probability_mass:.4f} "
+            f"| Top token: {evaluation.top_token!r} "
+            f"(id={evaluation.top_token_id}, p={evaluation.top_token_probability:.4f})"
         )
