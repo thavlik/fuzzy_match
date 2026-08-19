@@ -312,7 +312,7 @@ if __name__ == "__main__":
     print(f"Score threshold: {threshold}\n")
     total_passing = sum(evaluation.score >= threshold for evaluation in evaluations)
     print(
-        f"Should pass ({total_passing}/{len(passing_cases)}, min={minimum:.4f}, max={maximum:.4f}):"
+        f"Positive examples ({total_passing}/{len(passing_cases)} passing, min={minimum:.4f}, max={maximum:.4f}):"
     )
     min_passing = minimum
     for (concept, definition), evaluation in scored_cases:
@@ -344,7 +344,7 @@ if __name__ == "__main__":
     )
     total_failing = sum(evaluation.score < threshold for evaluation in evaluations)
     print(
-        f"Should fail ({total_failing}/{len(failing_cases)}, min={minimum:.4f}, max={maximum:.4f}):"
+        f"Negative examples ({total_failing}/{len(failing_cases)} passing, min={minimum:.4f}, max={maximum:.4f}):"
     )
     for (concept, definition), evaluation in scored_cases:
         probabilities = evaluation.relation_probabilities

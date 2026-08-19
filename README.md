@@ -312,3 +312,7 @@ more resources.
   owned for the lifetime of the Scryer process.
 - The bridge manages the GIL for each call, but GPU/model concurrency behavior
   is governed by PyTorch and Transformers.
+
+## License
+
+Apache 2.0 / MIT dual license.
