@@ -300,6 +300,11 @@ if __name__ == "__main__":
     # Natively reads your local cases file configuration
     from tests.cases import failing_cases, passing_cases
 
+    demonstrations = CONTRADICTION_DEMONSTRATIONS + EQUIVALENCE_DEMONSTRATIONS
+    demonstrated = {(concept, target) for concept, target, _ in demonstrations}
+    leaked = demonstrated & set(passing_cases + failing_cases)
+    assert not leaked, f"scored cases appear in the few-shot prompt: {sorted(leaked)}"
+
     evaluations = evaluate_medical_relations(passing_cases)
     minimum = min(evaluation.score for evaluation in evaluations)
     maximum = max(evaluation.score for evaluation in evaluations)
