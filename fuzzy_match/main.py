@@ -369,7 +369,7 @@ if __name__ == "__main__":
         print(
             f"Concept: {concept:<24} | Target: {definition:<40} "
             f"| Score: {evaluation.score:.4f} "
-            f"| Pass: {evaluation.score >= threshold} "
+            f"| Pass: {evaluation.score < threshold} "
         )
     print(
         f"\nTotal matching errors: {len(passing_cases) + len(failing_cases) - total_passing - total_failing}"
