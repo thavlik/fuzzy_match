@@ -80,7 +80,7 @@ CONTRADICTION_SYSTEM_PROMPT = """You are a precise clinical vocabulary auditor. 
 B = CONTRADICTORY: They describe opposite or mutually incompatible clinical states.
 A = NOT CONTRADICTORY: They are equivalent, compatible, or unrelated.
 
-A concept naming a condition asserts that it is present unless the concept itself expresses absence. Compare both the clinical idea and its assertion polarity. If one expression affirms an idea and the other denies or reverses that same idea, choose B even when every other medical word overlaps. Words such as no, not, without, absent, denies, negative, increased, and decreased can reverse the relationship. A negated expression can be compatible when the concept itself expresses absence, such as afebrile and without fever. Unrelated expressions are N, not B.
+A concept naming a condition asserts that it is present unless the concept itself expresses absence. Compare both the clinical idea and its assertion polarity. If one expression affirms an idea and the other denies or reverses that same idea, choose B even when every other medical word overlaps. Words such as no, not, without, absent, denies, negative, increased, and decreased can reverse the relationship. A negated expression can be compatible when the concept itself expresses absence, such as afebrile and without fever. Unrelated expressions are A, not B.
 
 Respond with exactly one label: A or B."""
 
